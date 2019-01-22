@@ -1,0 +1,118 @@
+# TRYING WITH ExternalProject_Add
+# original: https://github.com/IntelVCL/Open3D-PointNet2-Semantic3D/tree/68df2eb883b439f79930015396848b82597f4c77
+# ref: http://mesos.apache.org/documentation/latest/cmake-examples/
+# ref: https://mirkokiefer.com/cmake-by-example-f95eb47d45b1
+
+
+# CMake 3.8+ has build-in cuda support
+# ref: https://devblogs.nvidia.com/building-cuda-applications-cmake/
+# ref: https://stackoverflow.com/a/51769885/1255535
+cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
+project(tf_ops LANGUAGES CXX CUDA)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# # Open3D cmake
+# include(open3d.cmake)
+
+# ==== 1. Adding project with git repositiories ====
+include(ExternalProject)
+ExternalProject_Add(
+    ext_open3d
+    GIT_REPOSITORY https://github.com/IntelVCL/Open3D.git
+    GIT_TAG 33e46f7 # Thu Nov 29 21:19:44
+    PREFIX open3d
+    UPDATE_COMMAND ""
+    BUILD_COMMAND make -j
+    INSTALL_COMMAND ""
+    CMAKE_ARGS
+            #    -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
+            #    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+            #    -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+               -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+               -DBUILD_SHARED_LIBS=OFF
+               -DWITH_OPENMP=ON
+               -DBUILD_EIGEN3=ON
+               -DBUILD_GLEW=ON
+               -DBUILD_GLFW=ON
+               -DBUILD_JPEG=ON
+               -DBUILD_JSONCPP=ON
+               -DBUILD_PNG=ON
+               -DBUILD_TINYFILEDIALOGS=ON
+               -DBUILD_CPP_EXAMPLES=ON
+               -DBUILD_PYBIND11=OFF
+               -DBUILD_PYTHON_MODULE=OFF
+               -DENABLE_JUPYTER=OFF
+               -DBUILD_CPP_EXAMPLES=OFF
+)
+
+# ==== 2. Get DIR set with ExternalProjectAdd()
+ExternalProject_Get_property(ext_open3d SOURCE_DIR BINARY_DIR)
+set (Open3D_LIBRARY_DIRS ${BINARY_DIR}/lib)
+set (Open3D_INCLUDE_DIRS ${SOURCE_DIR}/src)
+# ==== 3. add library of external project as imported (library will compile
+# ====    during make)
+add_library(Open3d_LIBRARIES STATIC IMPORTED)
+set_target_properties(Open3d_LIBRARIES PROPERTIES
+                      IMPORTED_LOCATION ${Open3D_LIBRARY_DIRS}/libOpen3D.a
+                    #   INTERFACE_INCLUDE_DIRECTORIES ${Open3D_INCLUDE_DIRS}
+                      )
+# ==== 4. Make added library depends on external project so it can be built before
+add_dependencies(Open3d_LIBRARIES ext_open3d)
+message(STATUS "Open3d Include DIR: ${Open3D_INCLUDE_DIRS}" )
+message(STATUS "Open3d Library: ${Open3d_LIBRARIES}" )
+
+
+message(STATUS "Open3D installed to: ${Open3D_LIBRARY_DIRS}")
+# set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${Open3D_C_FLAGS}")
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${Open3D_CXX_FLAGS} -O3")
+# set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${Open3D_EXE_LINKER_FLAGS}")
+
+# Custom finders path
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR})
+
+# This exports the following variables:
+# TensorFlow_INCLUDE_DIR
+# TensorFlow_DIR
+# TensorFlow_CXX_ABI
+# TensorFlow_GIT_VERSION
+# TensorFlow_VERSION
+find_package(TensorFlow REQUIRED)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=${TensorFlow_CXX_ABI}")
+
+link_directories(
+    ${TensorFlow_DIR}
+    ${CMAKE_CUDA_IMPLICIT_LINK_DIRECTORIES}
+)
+include_directories(
+    ${TensorFlow_INCLUDE_DIR}
+    ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+)
+
+# Grouping
+add_library(tf_grouping SHARED
+    tf_grouping.cu
+    tf_grouping.cpp
+)
+target_compile_features(tf_grouping PUBLIC cxx_std_11)
+target_link_libraries(tf_grouping cudart tensorflow_framework)
+set_target_properties(tf_grouping PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+
+# Interpolate
+link_directories(${Open3D_LIBRARY_DIRS})
+add_library(tf_interpolate SHARED
+    tf_interpolate.cpp
+)
+target_compile_features(tf_interpolate PUBLIC cxx_std_11)
+target_include_directories(tf_interpolate PUBLIC ${Open3D_INCLUDE_DIRS})
+# ==== 5. include library in project output
+target_link_libraries(tf_interpolate tensorflow_framework Open3d_LIBRARIES)
+
+# Grouping
+add_library(tf_sampling SHARED
+    tf_sampling.cu
+    tf_sampling.cpp
+)
+target_compile_features(tf_sampling PUBLIC cxx_std_11)
+target_link_libraries(tf_sampling cudart tensorflow_framework)
+set_target_properties(tf_sampling PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
